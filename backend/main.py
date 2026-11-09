@@ -13,7 +13,7 @@ app = FastAPI(title='AI Infrastructure Observatory API')
 
 allowed_origins = os.getenv(
     'ALLOWED_ORIGINS',
-    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://*.netlify.app,https://fancy-pastelito-ac78d1.netlify.app',
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:3000',
 ).split(',')
 
 app.add_middleware(
@@ -296,9 +296,8 @@ def health():
     return {'status': 'ok'}
 
 
-@app.get('/api/geocode')
-def geocode_place(q: str = Query(min_length=2, max_length=120)):
-    query = urlencode({'q': q, 'format': 'jsonv2', 'limit': 1, 'countrycodes': 'in', 'addressdetails': 1})
+def _search_places(q: str, limit: int) -> list[dict[str, str]]:
+    query = urlencode({'q': q, 'format': 'jsonv2', 'limit': limit, 'countrycodes': 'in', 'addressdetails': 1})
     request = Request(
         f'https://nominatim.openstreetmap.org/search?{query}',
         headers={'Accept': 'application/json', 'User-Agent': 'AI-Infrastructure-Observatory/1.0'},
@@ -310,15 +309,30 @@ def geocode_place(q: str = Query(min_length=2, max_length=120)):
     except Exception as error:
         raise HTTPException(status_code=502, detail='Place lookup is temporarily unavailable.') from error
 
-    if not results:
-        raise HTTPException(status_code=404, detail='No matching Indian place found.')
+    places = []
+    for result in results:
+        address = result.get('address', {})
+        places.append({
+            'name': result.get('name') or address.get('city') or address.get('town') or address.get('village') or q,
+            'state': address.get('state', ''),
+            'display_name': result['display_name'],
+            'lat': result['lat'],
+            'lon': result['lon'],
+        })
+    return places
 
-    result = results[0]
-    address = result.get('address', {})
-    return {
-        'name': result.get('name') or address.get('city') or address.get('town') or address.get('village') or q,
-        'state': address.get('state', ''),
-        'display_name': result['display_name'],
-        'lat': result['lat'],
-        'lon': result['lon'],
-    }
+
+@app.get('/api/places')
+def suggest_places(q: str = Query(min_length=2, max_length=120)):
+    places = _search_places(q, limit=5)
+    if not places:
+        raise HTTPException(status_code=404, detail='No matching Indian place found.')
+    return places
+
+
+@app.get('/api/geocode')
+def geocode_place(q: str = Query(min_length=2, max_length=120)):
+    places = _search_places(q, limit=1)
+    if not places:
+        raise HTTPException(status_code=404, detail='No matching Indian place found.')
+    return places[0]

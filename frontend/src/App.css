@@ -174,7 +174,6 @@
 }
 
 .field-label input {
-  margin-top: 8px;
   width: 100%;
   box-sizing: border-box;
   background: rgba(2, 6, 23, 0.7);
@@ -183,6 +182,68 @@
   padding: 0.8rem 0.9rem;
   color: #f8fafc;
   font: inherit;
+}
+
+.search-input-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+.city-suggestions {
+  position: absolute;
+  z-index: 1200;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid rgba(125, 211, 252, 0.36);
+  border-radius: 12px;
+  background: #081222;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.48);
+}
+
+.city-suggestion {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.city-suggestion:hover,
+.city-suggestion.active {
+  background: rgba(8, 145, 178, 0.2);
+}
+
+.city-suggestion strong {
+  font-size: 0.78rem;
+}
+
+.city-suggestion span,
+.suggestion-status {
+  color: #a8b7ca;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.suggestion-status {
+  padding: 10px;
+}
+
+.suggestion-attribution {
+  margin: 4px 8px 3px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  color: #8092a9;
+  font-size: 0.6rem;
 }
 
 .label-title {
@@ -300,9 +361,8 @@
   color: #a5f3fc;
   background: rgba(2, 6, 23, 0.72);
   font-size: 0.74rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .inline-reset {
@@ -547,6 +607,213 @@
   font-weight: 600;
 }
 
+.city-profile {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.city-profile-band {
+  width: 100%;
+  margin: 20px 0;
+  padding: 20px;
+}
+
+.city-profile-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.city-profile-heading .detail-header h2 {
+  overflow-wrap: anywhere;
+}
+
+.city-coordinates {
+  margin: 0 0 4px;
+  color: #a8b7ca;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-facts-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.city-fact {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.city-fact span {
+  color: #94a3b8;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.city-fact strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.city-fact small {
+  color: #a8b7ca;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.city-summary-note {
+  padding: 12px;
+}
+
+.city-facility-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.city-facility-list .panel-heading {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.city-facility-list .panel-heading h3 {
+  font-size: 0.88rem;
+}
+
+.city-facility-list .panel-heading span {
+  color: #a8b7ca;
+  font-size: 0.68rem;
+}
+
+.city-facility-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(2, 6, 23, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+}
+
+.city-facility-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.city-facility-main:hover .city-facility-title strong,
+.city-facility-main:focus-visible .city-facility-title strong {
+  color: #7dd3fc;
+}
+
+.city-facility-main:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 3px;
+}
+
+.city-facility-source {
+  padding-top: 7px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  color: #a8b7ca;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.city-facility-source a {
+  display: inline-block;
+  margin-left: 8px;
+  color: #7dd3fc;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.city-facility-source a:hover {
+  color: #a5f3fc;
+}
+
+.city-facility-main:hover,
+.city-facility-main:focus-visible {
+  border-color: transparent;
+}
+
+.city-facility-row:focus-within {
+  border-color: rgba(125, 211, 252, 0.7);
+}
+
+.city-facility-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.city-facility-title strong,
+.city-facility-title span,
+.city-facility-reason,
+.city-no-facilities {
+  overflow-wrap: anywhere;
+}
+
+.city-facility-title strong {
+  font-size: 0.8rem;
+}
+
+.city-facility-title span,
+.city-facility-reason,
+.city-no-facilities {
+  color: #a8b7ca;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.city-facility-reason {
+  grid-column: 1 / -1;
+}
+
+.city-facility-reason strong {
+  color: #dbeafe;
+}
+
+.city-no-facilities {
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.city-resources a {
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .location-reset {
   display: inline-block;
   margin-top: 16px;
@@ -733,6 +1000,11 @@ table {
   text-decoration: underline;
 }
 
+.table-source-missing {
+  color: #a8b7ca;
+  font-size: 0.76rem;
+}
+
 th,
 td {
   text-align: left;
@@ -831,6 +1103,20 @@ tbody tr:hover {
   .methodology-grid,
   .detail-list {
     grid-template-columns: 1fr;
+  }
+
+  .city-facts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .city-profile-band {
+    padding: 14px;
+  }
+
+  .city-profile-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .header-actions,

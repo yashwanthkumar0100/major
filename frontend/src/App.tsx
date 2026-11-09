@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { GeoJSON, MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -22,6 +22,7 @@ type Facility = {
   longitude: number
   rationale: string
   source: string
+  source_url?: string
   last_verified: string
 }
 
@@ -61,11 +62,14 @@ type SearchLocation = {
   longitude: number
 }
 
+const APP_TITLE = 'Climate IndiaAI Infrastructure Observatory'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 const createApiUrl = (path: string) => (API_BASE ? `${API_BASE}${path}` : path)
+const NEARBY_RADIUS_KM = 50
 const hubs = ['All', 'Mumbai-Pune', 'Chennai', 'Hyderabad', 'NCR', 'Bengaluru']
 const tierOptions = ['All', 'Confirmed', 'Likely', 'Mixed-use', 'Unclassified']
-const sourceUrls: Record<string, string> = {
+const operatorUrls: Record<string, string> = {
   Yotta: 'https://www.yotta.com/',
   AdaniConneX: 'https://www.adaniconnex.com/',
   CtrlS: 'https://www.ctrls.in/',
@@ -76,7 +80,6 @@ const sourceUrls: Record<string, string> = {
   Sify: 'https://www.sify.com/',
   Nile: 'https://www.niledata.com/',
 }
-
 const FALLBACK_FACILITIES: Facility[] = [
   {
     id: 1,
@@ -329,10 +332,6 @@ const getRiskColor = (value: string) => {
   return colors[value] ?? '#94a3b8'
 }
 
-const getSourceUrl = (operator: string, source: string) => {
-  return sourceUrls[operator] ?? `https://www.google.com/search?q=${encodeURIComponent(source)}`
-}
-
 const isRecentlyVerified = (date: string) => date >= '2026-08-01'
 
 const getCityMapsUrl = (location: SearchLocation) => {
@@ -341,6 +340,33 @@ const getCityMapsUrl = (location: SearchLocation) => {
 
 const getCitySearchUrl = (location: SearchLocation) => {
   return `https://www.google.com/search?q=${encodeURIComponent(`${location.name}, ${location.state} India`)}`
+}
+
+const getDistanceKm = (from: SearchLocation, facility: Facility) => {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180
+  const latitudeDelta = radians(facility.latitude - from.latitude)
+  const longitudeDelta = radians(facility.longitude - from.longitude)
+  const arc =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(from.latitude)) *
+      Math.cos(radians(facility.latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc))
+}
+
+const isPointInRing = (longitude: number, latitude: number, ring: number[][]) => {
+  let inside = false
+  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
+    const [currentLongitude, currentLatitude] = ring[current]
+    const [previousLongitude, previousLatitude] = ring[previous]
+    const crossesLatitude = (currentLatitude > latitude) !== (previousLatitude > latitude)
+    const crossingLongitude =
+      ((previousLongitude - currentLongitude) * (latitude - currentLatitude)) /
+        (previousLatitude - currentLatitude || Number.EPSILON) +
+      currentLongitude
+    if (crossesLatitude && longitude < crossingLongitude) inside = !inside
+  }
+  return inside
 }
 
 const getMarkerIcon = (tier: string, riskMode: RiskMode, riskValue: string) =>
@@ -387,10 +413,28 @@ function MapViewport({
   return null
 }
 
+const fallbackCityLocations: SearchLocation[] = [
+  { name: 'Mumbai', state: 'Maharashtra', displayName: 'Mumbai, Maharashtra, India', latitude: 19.076, longitude: 72.8777 },
+  { name: 'Panvel', state: 'Maharashtra', displayName: 'Panvel, Maharashtra, India', latitude: 18.989, longitude: 73.117 },
+  { name: 'Dighi', state: 'Maharashtra', displayName: 'Dighi, Maharashtra, India', latitude: 18.53, longitude: 72.91 },
+  { name: 'Pune', state: 'Maharashtra', displayName: 'Pune, Maharashtra, India', latitude: 18.5204, longitude: 73.8567 },
+  { name: 'Chennai', state: 'Tamil Nadu', displayName: 'Chennai, Tamil Nadu, India', latitude: 13.0827, longitude: 80.2707 },
+  { name: 'Hyderabad', state: 'Telangana', displayName: 'Hyderabad, Telangana, India', latitude: 17.385, longitude: 78.4867 },
+  { name: 'Gachibowli', state: 'Telangana', displayName: 'Gachibowli, Telangana, India', latitude: 17.4401, longitude: 78.3802 },
+  { name: 'Madhapur', state: 'Telangana', displayName: 'Madhapur, Telangana, India', latitude: 17.450, longitude: 78.388 },
+  { name: 'Noida', state: 'Uttar Pradesh', displayName: 'Noida, Uttar Pradesh, India', latitude: 28.5355, longitude: 77.391 },
+  { name: 'Delhi', state: 'Delhi', displayName: 'Delhi, India', latitude: 28.6139, longitude: 77.209 },
+  { name: 'Gurugram', state: 'Haryana', displayName: 'Gurugram, Haryana, India', latitude: 28.4595, longitude: 77.0266 },
+  { name: 'Bengaluru', state: 'Karnataka', displayName: 'Bengaluru, Karnataka, India', latitude: 12.9716, longitude: 77.5946 },
+  { name: 'Whitefield', state: 'Karnataka', displayName: 'Whitefield, Bengaluru, Karnataka, India', latitude: 12.9698, longitude: 77.7499 },
+  { name: 'Bommasandra', state: 'Karnataka', displayName: 'Bommasandra, Bengaluru, Karnataka, India', latitude: 13.012, longitude: 77.648 },
+  { name: 'Navi Mumbai', state: 'Maharashtra', displayName: 'Navi Mumbai, Maharashtra, India', latitude: 19.033, longitude: 73.0297 },
+]
+
 const getMatchedHub = (location: SearchLocation) => {
   const value = `${location.name} ${location.displayName}`.toLowerCase()
   const matches: Array<[string, string[]]> = [
-    ['Mumbai-Pune', ['mumbai', 'panvel', 'dighi', 'pune']],
+    ['Mumbai-Pune', ['mumbai', 'panvel', 'dighi', 'pune', 'navi mumbai']],
     ['Chennai', ['chennai']],
     ['Hyderabad', ['hyderabad', 'gachibowli', 'madhapur']],
     ['NCR', ['noida', 'delhi', 'gurgaon', 'gurugram']],
@@ -406,6 +450,10 @@ function App() {
   const [districts, setDistricts] = useState<DistrictFeatureCollection | null>(null)
   const [searchLocation, setSearchLocation] = useState<SearchLocation | null>(null)
   const [locationLoading, setLocationLoading] = useState(false)
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const [placeSuggestions, setPlaceSuggestions] = useState<SearchLocation[]>([])
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
   const [search, setSearch] = useState('')
   const [selectedHub, setSelectedHub] = useState('All')
   const [selectedTier, setSelectedTier] = useState('All')
@@ -415,6 +463,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [backendHealthy, setBackendHealthy] = useState(false)
+  const [backendIssue, setBackendIssue] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -430,14 +479,8 @@ function App() {
 
         setBackendHealthy(true)
 
-        const params = new URLSearchParams()
-
-        if (selectedHub !== 'All') params.set('hub', selectedHub)
-        if (selectedTier !== 'All') params.set('tier', selectedTier)
-        if (search.trim()) params.set('search', search.trim())
-
         const [facilityResponse, summaryResponse] = await Promise.all([
-          fetch(createApiUrl(`/api/facilities?${params.toString()}`), { signal: controller.signal }),
+          fetch(createApiUrl('/api/facilities'), { signal: controller.signal }),
           fetch(createApiUrl('/api/stats/summary'), { signal: controller.signal }),
         ])
 
@@ -454,6 +497,7 @@ function App() {
         setFacilities(facilityData)
         setSummary(summaryData)
         setDistricts(districtData)
+        setBackendIssue(null)
         setSelectedFacilityId((current) => {
           if (facilityData.some((facility) => facility.id === current)) return current
           return facilityData[0]?.id ?? null
@@ -466,7 +510,7 @@ function App() {
           setSummary(getFallbackSummary())
           setDistricts(FALLBACK_DISTRICTS)
           setSelectedFacilityId(FALLBACK_FACILITIES[0]?.id ?? null)
-          setError(null)
+          setBackendIssue(caughtError instanceof Error ? caughtError.message : 'API request failed.')
         }
       } finally {
         setLoading(false)
@@ -476,57 +520,115 @@ function App() {
     loadData()
 
     return () => controller.abort()
-  }, [search, selectedHub, selectedTier])
+  }, [])
 
   useEffect(() => {
     const query = search.trim()
-    if (query.length < 3) {
-      return
-    }
+    if (query.length < 2 || searchLocation?.name === query) return
 
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
         setLocationLoading(true)
-        const response = await fetch(createApiUrl(`/api/geocode?q=${encodeURIComponent(query)}`), {
+        const response = await fetch(createApiUrl(`/api/places?q=${encodeURIComponent(query)}`), {
           signal: controller.signal,
         })
         if (!response.ok) {
-          setSearchLocation(null)
+          const fallbackLocations = fallbackCityLocations.filter((city) =>
+            `${city.name} ${city.state} ${city.displayName}`.toLowerCase().includes(query.toLowerCase()),
+          ).slice(0, 5)
+          setPlaceSuggestions(fallbackLocations)
+          setLocationError(fallbackLocations.length
+            ? 'Live lookup unavailable; offline locations are approximate.'
+            : response.status === 404
+              ? 'No matching Indian place was found.'
+              : 'Live place lookup is unavailable, and this city is not in the offline place list.')
           return
         }
 
-        const result = (await response.json()) as {
+        const results = (await response.json()) as Array<{
           name: string
           state: string
           display_name: string
           lat: string
           lon: string
-        }
-        setSearchLocation({
+        }>
+        setPlaceSuggestions(results.map((result) => ({
           name: result.name,
           state: result.state,
           displayName: result.display_name,
           latitude: Number(result.lat),
           longitude: Number(result.lon),
-        })
+        })))
+        setActiveSuggestionIndex(0)
+        setLocationError(null)
       } catch (caughtError) {
-        if ((caughtError as Error).name !== 'AbortError') setSearchLocation(null)
+        if ((caughtError as Error).name !== 'AbortError') {
+          const fallbackLocations = fallbackCityLocations.filter((city) =>
+            `${city.name} ${city.state} ${city.displayName}`.toLowerCase().includes(query.toLowerCase()),
+          ).slice(0, 5)
+          setPlaceSuggestions(fallbackLocations)
+          setLocationError(fallbackLocations.length
+            ? 'Live lookup unavailable; offline locations are approximate.'
+            : 'City lookup failed. Try a pilot city while the live place service is unavailable.')
+        }
       } finally {
-        setLocationLoading(false)
+        if (!controller.signal.aborted) setLocationLoading(false)
       }
-    }, 450)
+    }, 1000)
 
     return () => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [search])
+  }, [search, searchLocation])
 
-  const filteredFacilities = useMemo(() => facilities, [facilities])
+  const filteredFacilities = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase()
+    return facilities.filter((facility) => {
+      const matchesHub = selectedHub === 'All' || facility.hub === selectedHub
+      const matchesTier = selectedTier === 'All' || facility.classification_tier === selectedTier
+      const searchable = `${facility.name} ${facility.operator} ${facility.district} ${facility.hub}`.toLocaleLowerCase()
+      return matchesHub && matchesTier && (!query || searchable.includes(query))
+    })
+  }, [facilities, search, selectedHub, selectedTier])
 
-  const selectedFacility =
-    filteredFacilities.find((facility) => facility.id === selectedFacilityId) ?? filteredFacilities[0] ?? null
+  const allNearbyFacilities = useMemo(() => {
+    if (!searchLocation) return []
+    return facilities
+      .map((facility) => ({ facility, distance: getDistanceKm(searchLocation, facility) }))
+      .filter(({ distance }) => distance <= NEARBY_RADIUS_KM)
+      .sort((first, second) => first.distance - second.distance)
+  }, [facilities, searchLocation])
+
+  const nearbyFacilities = useMemo(
+    () => allNearbyFacilities.filter(({ facility }) =>
+      (selectedHub === 'All' || facility.hub === selectedHub) &&
+      (selectedTier === 'All' || facility.classification_tier === selectedTier),
+    ),
+    [allNearbyFacilities, selectedHub, selectedTier],
+  )
+
+  const clearFacilityFilters = () => {
+    setSelectedHub('All')
+    setSelectedTier('All')
+  }
+
+  const mapFacilities = searchLocation
+    ? nearbyFacilities.map(({ facility }) => facility)
+    : filteredFacilities
+
+  const selectedFacility = searchLocation
+    ? nearbyFacilities.find(({ facility }) => facility.id === selectedFacilityId)?.facility ?? nearbyFacilities[0]?.facility ?? null
+    : filteredFacilities.find((facility) => facility.id === selectedFacilityId) ?? filteredFacilities[0] ?? null
+
+  const displayedDistricts = useMemo(() => {
+    if (!districts || selectedHub === 'All') return districts
+    return {
+      ...districts,
+      features: districts.features.filter((feature) => feature.properties.hub === selectedHub),
+    }
+  }, [districts, selectedHub])
 
   const summaryCards = summary
     ? [
@@ -566,20 +668,9 @@ function App() {
 
   const locationDistrict = useMemo(() => {
     if (!searchLocation || !districts?.features.length) return null
-    return districts.features.reduce((closest, feature) => {
-      const ring = feature.geometry.coordinates[0]
-      const center = ring.reduce(
-        (sum, coordinate) => [sum[0] + coordinate[0], sum[1] + coordinate[1]],
-        [0, 0],
-      )
-      const centerLongitude = center[0] / ring.length
-      const centerLatitude = center[1] / ring.length
-      const distance = Math.hypot(
-        searchLocation.longitude - centerLongitude,
-        searchLocation.latitude - centerLatitude,
-      )
-      return !closest || distance < closest.distance ? { feature, distance } : closest
-    }, null as { feature: DistrictFeatureCollection['features'][number]; distance: number } | null)?.feature ?? null
+    return districts.features.find((feature) =>
+      isPointInRing(searchLocation.longitude, searchLocation.latitude, feature.geometry.coordinates[0]),
+    ) ?? null
   }, [districts, searchLocation])
 
   const correlationPoints = useMemo(() => {
@@ -600,9 +691,39 @@ function App() {
 
   const handleSearchChange = (value: string) => {
     setSearch(value)
-    if (value.trim().length < 3) {
-      setSearchLocation(null)
+    setSearchLocation(null)
+    setLocationError(null)
+    setPlaceSuggestions([])
+    setActiveSuggestionIndex(0)
+    setSuggestionsOpen(value.trim().length >= 2)
+    setLocationLoading(value.trim().length >= 2)
+    if (value.trim().length < 2) {
       setLocationLoading(false)
+    }
+  }
+
+  const selectCitySuggestion = (location: SearchLocation) => {
+    setSearch(location.name)
+    setSearchLocation(location)
+    setPlaceSuggestions([])
+    setSuggestionsOpen(false)
+    setLocationLoading(false)
+    setLocationError(null)
+  }
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      setSuggestionsOpen(false)
+    } else if (event.key === 'ArrowDown' && placeSuggestions.length) {
+      event.preventDefault()
+      setSuggestionsOpen(true)
+      setActiveSuggestionIndex((index) => (index + 1) % placeSuggestions.length)
+    } else if (event.key === 'ArrowUp' && placeSuggestions.length) {
+      event.preventDefault()
+      setActiveSuggestionIndex((index) => (index - 1 + placeSuggestions.length) % placeSuggestions.length)
+    } else if (event.key === 'Enter' && placeSuggestions.length) {
+      event.preventDefault()
+      selectCitySuggestion(placeSuggestions[activeSuggestionIndex])
     }
   }
 
@@ -613,7 +734,7 @@ function App() {
   }
 
   const handleDownloadCsv = () => {
-    const columns = ['Name', 'Operator', 'Hub', 'District', 'Tier', 'Water stress', 'Climate vulnerability', 'Capacity MW', 'Latitude', 'Longitude', 'Source', 'Last verified']
+    const columns = ['Name', 'Operator', 'Hub', 'District', 'Tier', 'Water stress (prototype)', 'Climate vulnerability (prototype)', 'Capacity MW', 'Latitude', 'Longitude', 'Rationale', 'Source reference', 'Direct evidence URL', 'Last verified']
     const rows = filteredFacilities.map((facility) => [
       facility.name,
       facility.operator,
@@ -625,7 +746,9 @@ function App() {
       facility.capacity_mw,
       facility.latitude,
       facility.longitude,
+      facility.rationale,
       facility.source,
+      facility.source_url ?? '',
       facility.last_verified,
     ])
     const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
@@ -664,13 +787,15 @@ function App() {
     <div className="app-shell">
       <div className={backendHealthy ? 'live-status live' : 'live-status offline'}>
         <span className="status-dot" />
-        {backendHealthy ? 'Live data stream: connected to the API' : 'Offline mode: backend is starting or unavailable'}
+        {backendHealthy
+          ? 'API connected · prototype dataset'
+          : `Demo data · API unavailable${backendIssue ? `: ${backendIssue}` : ''}`}
       </div>
 
       <header className="topbar">
         <div>
           <p className="eyebrow">AI Infrastructure Observatory</p>
-          <h1>India AI & Data Centre Risk Atlas</h1>
+          <h1>{APP_TITLE}</h1>
         </div>
         <div className="header-actions">
           <button className="ghost-button" type="button" onClick={handleDownloadCsv} disabled={!filteredFacilities.length}>
@@ -689,15 +814,50 @@ function App() {
             </button>
           </div>
 
-          <label className="field-label">
-            Search
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder="City, district, operator"
-            />
-          </label>
+          <div className="field-label">
+            <label htmlFor="city-search">Search city or facility</label>
+            <div className="search-input-wrap">
+              <input
+                id="city-search"
+                type="text"
+                value={search}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                onFocus={() => setSuggestionsOpen(true)}
+                onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 140)}
+                onKeyDown={handleSearchKeyDown}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={suggestionsOpen && placeSuggestions.length > 0}
+                aria-controls="city-suggestions"
+                aria-activedescendant={placeSuggestions.length ? `city-suggestion-${activeSuggestionIndex}` : undefined}
+                placeholder="Type a city, e.g. Mumbai"
+              />
+              {suggestionsOpen && search.trim().length >= 2 && (
+                <div className="city-suggestions" id="city-suggestions" role="listbox" aria-label="City suggestions">
+                  {locationLoading && <div className="suggestion-status">Searching Indian places…</div>}
+                  {!locationLoading && placeSuggestions.map((location, index) => (
+                    <button
+                      id={`city-suggestion-${index}`}
+                      className={index === activeSuggestionIndex ? 'city-suggestion active' : 'city-suggestion'}
+                      key={`${location.displayName}-${location.latitude}-${location.longitude}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSuggestionIndex}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectCitySuggestion(location)}
+                    >
+                      <strong>{location.name}{location.state ? `, ${location.state}` : ''}</strong>
+                      <span>{location.displayName}</span>
+                    </button>
+                  ))}
+                  {!locationLoading && !placeSuggestions.length && search.trim().length >= 2 && (
+                    <div className="suggestion-status">{locationError ?? 'No place suggestions found.'}</div>
+                  )}
+                  <div className="suggestion-attribution">Place suggestions by OpenStreetMap Nominatim</div>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="filter-group">
             <span className="label-title">Hub</span>
@@ -745,7 +905,7 @@ function App() {
             <div>
               <p className="eyebrow">Prototype coverage</p>
               <h2>5 metro hubs</h2>
-              <span className="map-data-note">Risk layers: WRI Aqueduct / CEEW · periodic updates</span>
+              <span className="map-data-note">Prototype risk areas · not verified city-level measurements</span>
             </div>
             <div className="toggle-group">
               <button
@@ -781,15 +941,15 @@ function App() {
               <div className="map-loading error">{error}</div>
             ) : (
               <MapContainer center={[22.5, 80.25]} zoom={5} scrollWheelZoom className="leaflet-map">
-                <MapViewport location={searchLocation} facilities={filteredFacilities} focusToken={mapFocusToken} />
+                <MapViewport location={searchLocation} facilities={mapFacilities} focusToken={mapFocusToken} />
                 <TileLayer
                   attribution='&copy; OpenStreetMap contributors'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                {districts && (
+                {displayedDistricts && (
                   <GeoJSON
                     key={mapMode}
-                    data={districts as never}
+                    data={displayedDistricts as never}
                     style={districtStyle}
                     onEachFeature={(feature, layer) => {
                       const properties = feature.properties as DistrictProperties
@@ -812,12 +972,12 @@ function App() {
                       <div className="popup-card">
                         <strong>Search location</strong>
                         <div>{searchLocation.displayName}</div>
-                        <div className="popup-risk">Matching facilities: {filteredFacilities.length}</div>
+                        <div className="popup-risk">Nearby facilities: {nearbyFacilities.length}</div>
                       </div>
                     </Popup>
                   </Marker>
                 )}
-                {filteredFacilities.map((facility) => (
+                {mapFacilities.map((facility) => (
                   <Marker
                     key={facility.id}
                     position={[facility.latitude, facility.longitude]}
@@ -846,15 +1006,23 @@ function App() {
             <div className="map-status" role="status">
               {locationLoading ? (
                 'Locating this city…'
+              ) : locationError ? (
+                `${locationError}${searchLocation ? ` Showing ${locationLabel}.` : ''}`
+              ) : searchLocation && !nearbyFacilities.length && allNearbyFacilities.length ? (
+                <>
+                  Located {locationLabel}. {allNearbyFacilities.length} nearby {allNearbyFacilities.length === 1 ? 'record is' : 'records are'} hidden by the active hub or AI-relevance filter.{' '}
+                  <button className="inline-reset" type="button" onClick={clearFacilityFilters}>Clear facility filters</button>
+                </>
               ) : searchLocation && !matchedHub ? (
-                `${locationLabel} isn't currently covered by this dataset. Tracked hubs: ${hubs.slice(1).join(', ')}.`
+                `${locationLabel} does not map to a named pilot hub in this prototype. The dataset covers five hubs: ${hubs.slice(1).join(', ')}.`
+              ) : searchLocation && !nearbyFacilities.length ? (
+                `Located ${locationLabel}. No matching facility records are within ${NEARBY_RADIUS_KM} km.`
               ) : searchLocation && !filteredFacilities.length ? (
                 <>
-                  No facilities in {locationLabel} match your current filters.{' '}
-                  <button className="inline-reset" type="button" onClick={resetFilters}>Reset filters</button>
+                  Located {locationLabel}. Nearby facilities are shown separately; none match the city-name search.
                 </>
               ) : searchLocation ? (
-                `${locationLabel} · ${filteredFacilities.length} matching facility records`
+                `${locationLabel} · ${filteredFacilities.length} record-text matches · ${nearbyFacilities.length} facilities within ${NEARBY_RADIUS_KM} km`
               ) : !filteredFacilities.length ? (
                 <>No location or facility found for “{search.trim()}”.</>
               ) : null}
@@ -866,10 +1034,12 @@ function App() {
           {selectedFacility ? (
             <>
               <div className="detail-header">
-                <p className="eyebrow">Selected facility</p>
+                <p className="eyebrow">{searchLocation ? 'Nearby facility' : 'Selected facility'}</p>
                 <h2>{selectedFacility.name}</h2>
                 <p className="selection-context">
-                  {searchLocation ? `Selected from the ${locationLabel} search results.` : 'Selected from the current filters.'}
+                  {searchLocation
+                    ? `${getDistanceKm(searchLocation, selectedFacility).toFixed(1)} km from ${locationLabel} · proximity match; exact city membership is not verified.`
+                    : 'Selected from the current filters.'}
                 </p>
               </div>
 
@@ -896,16 +1066,12 @@ function App() {
                   <dd>{selectedFacility.capacity_mw} MW</dd>
                 </div>
                 <div>
-                  <dt>{activeRiskLabel}</dt>
+                  <dt>{activeRiskLabel} (prototype)</dt>
                   <dd>{selectedFacilityRiskValue ?? '—'}</dd>
                 </div>
                 <div>
-                  <dt>Water stress</dt>
-                  <dd>{selectedFacility.water_stress}</dd>
-                </div>
-                <div>
-                  <dt>Climate vulnerability</dt>
-                  <dd>{selectedFacility.climate_vulnerability}</dd>
+                  <dt>{mapMode === 'water' ? 'Climate vulnerability' : 'Water stress'} (prototype)</dt>
+                  <dd>{mapMode === 'water' ? selectedFacility.climate_vulnerability : selectedFacility.water_stress}</dd>
                 </div>
                 <div>
                   <dt>Last verified</dt>
@@ -914,80 +1080,26 @@ function App() {
               </dl>
 
               <div className="rationale-box">
-                <h3>Classification rationale</h3>
+                <h3>{searchLocation ? 'Why this nearby facility is shown' : 'Why this facility is included'}</h3>
                 <p>{selectedFacility.rationale}</p>
               </div>
 
               <div className="source-box">
-                <h3>Source</h3>
+                <h3>Source and evidence</h3>
                 <p>{selectedFacility.source}</p>
-                <a href={getSourceUrl(selectedFacility.operator, selectedFacility.source)} target="_blank" rel="noreferrer">
-                  View {selectedFacility.source}
-                </a>
-                {searchLocation && (
-                  <a href={getCitySearchUrl(searchLocation)} target="_blank" rel="noreferrer">
-                    View {locationLabel} city details
-                  </a>
+                {selectedFacility.source_url ? (
+                  <a href={selectedFacility.source_url}>Open cited source</a>
+                ) : (
+                  <p>No direct source URL is recorded for this prototype entry. The source label is a research lead, not independently verifiable proof.</p>
                 )}
               </div>
             </>
           ) : searchLocation ? (
-            <div className="location-detail">
-              <div className="detail-header">
-                <p className="eyebrow">Selected search location</p>
-                <h2>{locationLabel}</h2>
-                <p className="selection-context">This map point is selected because it matches your city search.</p>
+            <div className="empty-state city-empty-state">
+              <div className="empty-state-content">
+                <strong>No nearby facility selected</strong>
+                <p>City risks, coverage notes, and the full nearby facility search are shown in the city results below.</p>
               </div>
-
-              <div className="tier-pill">Location found</div>
-
-              <dl className="detail-list">
-                <div>
-                  <dt>State</dt>
-                  <dd>{searchLocation.state || 'Not provided'}</dd>
-                </div>
-                <div>
-                  <dt>Dataset coverage</dt>
-                  <dd>{matchedHub ?? 'Outside tracked hubs'}</dd>
-                </div>
-                <div>
-                  <dt>Matching facilities</dt>
-                  <dd>{filteredFacilities.length}</dd>
-                </div>
-                <div>
-                  <dt>Water stress</dt>
-                  <dd>{locationDistrict?.properties.water_stress ?? 'Not available'}</dd>
-                </div>
-                <div>
-                  <dt>Climate vulnerability</dt>
-                  <dd>{locationDistrict?.properties.climate_vulnerability ?? 'Not available'}</dd>
-                </div>
-                <div>
-                  <dt>Coordinates</dt>
-                  <dd>{searchLocation.latitude.toFixed(4)}, {searchLocation.longitude.toFixed(4)}</dd>
-                </div>
-              </dl>
-
-              <div className="rationale-box">
-                <h3>Why no facility is selected</h3>
-                <p>
-                  {matchedHub
-                    ? 'The location is inside a tracked hub, but no facility matches the current search or filters. Risk values below come from the nearest prototype district layer.'
-                    : 'The location marker is real, but this prototype only tracks five metro hubs. It is not a facility record.'}
-                </p>
-              </div>
-
-              <div className="source-box">
-                <h3>City and data-centre research</h3>
-                <p>These links describe the searched location. They are not facility records in this dataset.</p>
-                <a href={getCityMapsUrl(searchLocation)} target="_blank" rel="noreferrer">Open city in Google Maps</a>
-                <a href={getCitySearchUrl(searchLocation)} target="_blank" rel="noreferrer">Search city information</a>
-                <a href={`https://www.google.com/search?q=${encodeURIComponent(`${searchLocation.name} ${searchLocation.state} data center`)}`} target="_blank" rel="noreferrer">
-                  Search data centers in {searchLocation.name}
-                </a>
-              </div>
-
-              <button className="inline-reset location-reset" type="button" onClick={resetFilters}>Clear search and filters</button>
             </div>
           ) : (
             <div className="empty-state">
@@ -1000,6 +1112,110 @@ function App() {
           )}
         </aside>
       </main>
+
+      {searchLocation && (
+        <section className="city-profile city-profile-band panel" aria-label={`${locationLabel} city information`}>
+          <div className="city-profile-heading">
+            <div className="detail-header">
+              <p className="eyebrow">City profile</p>
+              <h2>{locationLabel}</h2>
+              <p className="selection-context">{searchLocation.displayName}</p>
+            </div>
+            <p className="city-coordinates">{searchLocation.latitude.toFixed(4)}, {searchLocation.longitude.toFixed(4)}</p>
+          </div>
+
+          <div className="city-facts-grid">
+            <div className="city-fact">
+              <span>Water stress</span>
+              <strong>{locationDistrict?.properties.water_stress ?? 'Not covered'}</strong>
+              <small>{locationDistrict?.properties.name ?? 'No mapped prototype area'}</small>
+            </div>
+            <div className="city-fact">
+              <span>Climate risk</span>
+              <strong>{locationDistrict?.properties.climate_vulnerability ?? 'Not covered'}</strong>
+              <small>{locationDistrict?.properties.name ?? 'No mapped prototype area'}</small>
+            </div>
+            <div className="city-fact">
+              <span>Nearby facilities</span>
+              <strong>{allNearbyFacilities.length}</strong>
+              <small>within {NEARBY_RADIUS_KM} km of search point</small>
+            </div>
+            <div className="city-fact">
+              <span>Pilot hub</span>
+              <strong>{matchedHub ?? 'No name match'}</strong>
+              <small>{matchedHub ? 'Name-based association, not a boundary' : 'Outside the five named pilot hubs'}</small>
+            </div>
+          </div>
+
+          <div className="rationale-box city-summary-note">
+            <h3>City coverage and risk</h3>
+            <p>
+              {locationDistrict
+                ? 'Risk categories describe the prototype polygon containing this search point. They are not verified city-wide or facility measurements; dataset release and measurement date are not attached.'
+                : 'No risk polygon covers this search point, so water stress and climate risk are not available for this city in the current prototype. The app does not infer values from a nearby district.'}
+              {' '}
+              {allNearbyFacilities.length
+                ? `The list below shows ${allNearbyFacilities.length} facility record${allNearbyFacilities.length === 1 ? '' : 's'} within ${NEARBY_RADIUS_KM} km; proximity does not establish that a facility is inside the city.`
+                : `No catalogued facility record is within ${NEARBY_RADIUS_KM} km. This means no record in the current prototype, not proof that the city has no data centres.`}
+            </p>
+            {allNearbyFacilities.length > 0 && nearbyFacilities.length === 0 && (
+              <p>
+                Nearby records are hidden by the active {selectedHub !== 'All' ? `hub filter (${selectedHub})` : `AI-relevance filter (${selectedTier})`}.
+                {' '}<button className="inline-reset" type="button" onClick={clearFacilityFilters}>Clear facility filters</button>
+              </p>
+            )}
+          </div>
+
+          <section className="city-facility-list" aria-label="Nearby data centre records">
+            <div className="panel-heading">
+              <h3>Nearby data-centre records</h3>
+              <span>{allNearbyFacilities.length} within {NEARBY_RADIUS_KM} km</span>
+            </div>
+            {allNearbyFacilities.length ? allNearbyFacilities.map(({ facility, distance }) => (
+              <article className="city-facility-row" key={facility.id}>
+                <button
+                  className="city-facility-main"
+                  type="button"
+                  onClick={() => {
+                    setSelectedHub('All')
+                    setSelectedTier('All')
+                    setSelectedFacilityId(facility.id)
+                  }}
+                >
+                  <span className="city-facility-title">
+                    <strong>{facility.name}</strong>
+                    <span>{facility.operator} · {facility.hub} · {facility.district} · {distance.toFixed(1)} km</span>
+                  </span>
+                  <span className="mini-pill">{facility.classification_tier}</span>
+                  <span className="city-facility-reason"><strong>Why included:</strong> {facility.rationale}</span>
+                </button>
+                <span className="city-facility-source">
+                  {facility.source_url ? (
+                    <a href={facility.source_url}>Open {facility.source}</a>
+                  ) : (
+                    <>
+                      <span>{facility.source} · direct facility citation not recorded</span>
+                      {operatorUrls[facility.operator] && (
+                        <a href={operatorUrls[facility.operator]}>Operator background (not facility evidence)</a>
+                      )}
+                    </>
+                  )}
+                </span>
+              </article>
+            )) : (
+              <p className="city-no-facilities">No facility in the current prototype catalog is within {NEARBY_RADIUS_KM} km. Search coverage is limited to five pilot hubs and is not an exhaustive national inventory.</p>
+            )}
+          </section>
+
+          <div className="resource-links city-resources">
+            <a href="https://www.wri.org/aqueduct">Open WRI Aqueduct</a>
+            <a href="https://www.ceew.in/">Open CEEW research</a>
+            <a href="https://nominatim.openstreetmap.org/">Open Nominatim</a>
+            <a href={getCityMapsUrl(searchLocation)}>Open this city on Google Maps</a>
+            <a href={getCitySearchUrl(searchLocation)}>Research city infrastructure</a>
+          </div>
+        </section>
+      )}
 
       <section className="stats-grid" aria-label="summary statistics">
         {summaryCards.map((card) => (
@@ -1046,7 +1262,7 @@ function App() {
         <article className="panel chart-panel">
           <div className="panel-heading">
             <h3>AI density vs water stress</h3>
-            <span>Spearman r = 0.61 · {filteredFacilities.length} plotted</span>
+            <span>{filteredFacilities.length} plotted · descriptive only</span>
           </div>
 
           <div className="scatter-chart" aria-label="AI density versus water stress">
@@ -1066,7 +1282,7 @@ function App() {
             )}
           </div>
           <p className="chart-caption">
-            Points update with the active facility search and filters. The reported correlation is the prototype dataset coefficient; correlation does not imply causation.
+            Points update with the active facility search and filters. Risk categories and this small-sample pattern are exploratory prototype context, not a measured or causal relationship.
           </p>
         </article>
       </section>
@@ -1102,15 +1318,19 @@ function App() {
                   </td>
                   <td>{facility.water_stress}</td>
                   <td>
-                    <a
-                      className="table-source-link"
-                      href={getSourceUrl(facility.operator, facility.source)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {facility.source}
-                    </a>
+                    {facility.source_url ? (
+                      <a
+                        className="table-source-link"
+                        href={facility.source_url}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Open {facility.source}
+                      </a>
+                    ) : (
+                      <span className="table-source-missing" title="No direct source URL is recorded">
+                        {facility.source} · citation URL missing
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
