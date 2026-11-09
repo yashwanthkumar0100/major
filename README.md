@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Climate IndiaAI Infrastructure Observatory
 
 ## Local development
@@ -34,3 +35,6 @@ Place lookup uses OpenStreetMap Nominatim when the API is available, with a one-
 npm run build --prefix frontend
 npm run lint --prefix frontend
 ```
+=======
+# major
+>>>>>>> de784f716a17d82db4180818800d130f94a6e317
